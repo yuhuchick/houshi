@@ -1530,6 +1530,93 @@
         return envTexturesLoadPromise;
       }
 
+      const ITEM_TEXTURE_ROOT = "assets/images/item/";
+      const itemTextures = {
+        notePaper: null,
+        batteryBody: null,
+        medkit: null,
+        glowPowder: null,
+        sedative: null,
+        fileCabinet: null
+      };
+      let itemTexturesLoadPromise;
+
+      function configureItemTextureClamp(tex) {
+        tex.userData = tex.userData || {};
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.repeat.set(1, 1);
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+        tex.userData.sharedEnvSurface = true;
+        tex.anisotropy = 4;
+      }
+
+      function configureItemTextureRepeat(tex, repeatU, repeatV) {
+        tex.userData = tex.userData || {};
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeatU, repeatV);
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+        tex.userData.sharedEnvSurface = true;
+        tex.anisotropy = 4;
+      }
+
+      function loadItemTexturesOnce() {
+        if (itemTexturesLoadPromise) {
+          return itemTexturesLoadPromise;
+        }
+        itemTexturesLoadPromise = new Promise((resolve) => {
+          if (typeof THREE === "undefined" || !THREE.TextureLoader) {
+            resolve();
+            return;
+          }
+          const loader = new THREE.TextureLoader();
+          const jobs = [
+            { key: "notePaper", file: "note_paper_albedo.png", clamp: true },
+            { key: "medkit", file: "medkit_albedo.png", clamp: true },
+            { key: "glowPowder", file: "glow_powder_albedo.png", clamp: true },
+            { key: "fileCabinet", file: "file_cabinet_albedo.png", clamp: false, ru: 1.15, rv: 1.75 },
+            { key: "batteryBody", file: "battery_body_albedo.png", clamp: false, ru: 3.25, rv: 1 },
+            { key: "sedative", file: "sedative_albedo.png", clamp: false, ru: 2.25, rv: 1 }
+          ];
+          let remaining = jobs.length;
+          const tryFinish = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+              resolve();
+            }
+          };
+          jobs.forEach((job) => {
+            loader.load(
+              ITEM_TEXTURE_ROOT + job.file,
+              (tex) => {
+                if (job.clamp) {
+                  configureItemTextureClamp(tex);
+                } else {
+                  configureItemTextureRepeat(tex, job.ru || 2, job.rv || 1);
+                }
+                itemTextures[job.key] = tex;
+                tryFinish();
+              },
+              undefined,
+              () => {
+                itemTextures[job.key] = null;
+                tryFinish();
+              }
+            );
+          });
+        });
+        return itemTexturesLoadPromise;
+      }
+
+      function getFileCabinetBodyMaterial(fallbackHex) {
+        return itemTextures.fileCabinet
+          ? makeLitSurfaceMaterial(itemTextures.fileCabinet, fallbackHex)
+          : makeMaterial(fallbackHex, null);
+      }
+
       /** Albedo PNG + white vertex color (tint preserved when no PNG). Shared maps must carry userData.sharedEnvSurface. */
       function makeLitSurfaceMaterial(map, tintHex) {
         if (map) {
@@ -2261,7 +2348,7 @@
           if (index === 0 || randomHash(cx, cz, 62 + index) > 0.42) {
             addOfficeDesk(group, slot.x, slot.z, slot.rotation, material);
           } else {
-            addFileCabinet(group, slot.x, slot.z, slot.rotation, makeMaterial(0x2d3033), false);
+            addFileCabinet(group, slot.x, slot.z, slot.rotation, getFileCabinetBodyMaterial(0x2d3033), false);
           }
         } else if (index === 0) {
           addPipeCluster(group, slot.x, slot.z, slot.rotation);
@@ -2357,7 +2444,7 @@
         const searched = state.collected.includes(id);
         let container;
         if (state.levelIndex === 1) {
-          container = addFileCabinet(group, slot.x, slot.z, slot.rotation, makeMaterial(0x34383c), true);
+          container = addFileCabinet(group, slot.x, slot.z, slot.rotation, getFileCabinetBodyMaterial(0x34383c), true);
         } else if (state.levelIndex === 2) {
           container = addMetalCrate(group, slot.x, slot.z, slot.rotation, makeMaterial(0x4b555b), true);
         } else {
@@ -2544,7 +2631,18 @@
         }
         let mesh;
         if (type === "note") {
-          mesh = new THREE.Mesh(new THREE.BoxBufferGeometry(0.84, 0.05, 0.6), makeMaterial(0xfff3a8));
+          if (itemTextures.notePaper) {
+            mesh = new THREE.Mesh(
+              new THREE.PlaneBufferGeometry(0.84, 0.6),
+              new THREE.MeshLambertMaterial({
+                color: 0xffffff,
+                map: itemTextures.notePaper,
+                side: THREE.DoubleSide
+              })
+            );
+          } else {
+            mesh = new THREE.Mesh(new THREE.BoxBufferGeometry(0.84, 0.05, 0.6), makeMaterial(0xfff3a8));
+          }
           mesh.rotation.x = -Math.PI / 2;
           if (state.levelIndex === 0 || state.levelIndex === 3) {
             const noteColor = state.levelIndex === 3 ? 0x9fffd0 : 0xffef7d;
@@ -2561,13 +2659,35 @@
             mesh.userData.extras = [marker, ring];
           }
         } else if (type === "battery") {
-          mesh = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.18, 0.18, 0.64, 12), makeMaterial(0x75f2ff));
+          mesh = new THREE.Mesh(
+            new THREE.CylinderBufferGeometry(0.18, 0.18, 0.64, 12),
+            itemTextures.batteryBody
+              ? makeLitSurfaceMaterial(itemTextures.batteryBody, 0x75f2ff)
+              : makeMaterial(0x75f2ff)
+          );
           mesh.rotation.z = Math.PI / 2;
         } else if (type === "sedative") {
-          mesh = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.14, 0.14, 0.52, 12), makeMaterial(0x99f0ff));
+          mesh = new THREE.Mesh(
+            new THREE.CylinderBufferGeometry(0.14, 0.14, 0.52, 12),
+            itemTextures.sedative
+              ? makeLitSurfaceMaterial(itemTextures.sedative, 0x99f0ff)
+              : makeMaterial(0x99f0ff)
+          );
           mesh.rotation.z = Math.PI / 2;
         } else if (type === "glowPowder") {
-          mesh = new THREE.Mesh(new THREE.SphereBufferGeometry(0.22, 12, 12), makeMaterial(0xb8ff6b));
+          mesh = new THREE.Mesh(
+            new THREE.SphereBufferGeometry(0.22, 12, 12),
+            itemTextures.glowPowder
+              ? makeLitSurfaceMaterial(itemTextures.glowPowder, 0xb8ff6b)
+              : makeMaterial(0xb8ff6b)
+          );
+        } else if (type === "medkit") {
+          mesh = new THREE.Mesh(
+            new THREE.BoxBufferGeometry(0.58, 0.22, 0.42),
+            itemTextures.medkit
+              ? makeLitSurfaceMaterial(itemTextures.medkit, 0xffeee5)
+              : makeMaterial(0xffeee5)
+          );
         } else {
           mesh = new THREE.Mesh(new THREE.BoxBufferGeometry(0.58, 0.22, 0.42), makeMaterial(0xffeee5));
         }
@@ -4998,17 +5118,19 @@
           return;
         }
         const cap = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-        Object.keys(envTextures).forEach((key) => {
-          const t = envTextures[key];
-          if (t && t.isTexture) {
-            t.anisotropy = cap;
-            t.needsUpdate = true;
-          }
+        [envTextures, itemTextures].forEach((bucket) => {
+          Object.keys(bucket).forEach((key) => {
+            const t = bucket[key];
+            if (t && t.isTexture) {
+              t.anisotropy = cap;
+              t.needsUpdate = true;
+            }
+          });
         });
       }
 
       async function startGame(slotId = "") {
-        await loadEnvTexturesOnce();
+        await Promise.all([loadEnvTexturesOnce(), loadItemTexturesOnce()]);
         state.playerExpression = "neutral";
         state.playerAction = "";
         state.playerActionAt = 0;
@@ -5078,6 +5200,7 @@
       });
       renderSaveLists();
       loadEnvTexturesOnce();
+      loadItemTexturesOnce();
       tick();
     })();
   </script>
