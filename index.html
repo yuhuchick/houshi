@@ -722,6 +722,44 @@
       margin-top: 14px;
     }
 
+    .teammate-outline-settings {
+      margin: 8px 0 10px;
+      padding: 12px;
+      border: 1px solid rgba(84, 164, 255, 0.35);
+      border-radius: 12px;
+      background: rgba(26, 49, 78, 0.35);
+    }
+
+    .teammate-outline-settings h3 {
+      margin: 0 0 10px;
+      color: #a8d1ff;
+      font-size: 15px;
+    }
+
+    .teammate-outline-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 8px;
+      color: rgba(236, 246, 255, 0.9);
+      font-size: 13px;
+    }
+
+    .teammate-outline-row input[type="number"] {
+      width: 92px;
+      min-height: 34px;
+      padding: 0 8px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.28);
+      color: #fff;
+    }
+
+    .teammate-outline-row input[type="range"] {
+      width: 130px;
+    }
+
     .secondary-button {
       flex: 1;
       min-height: 46px;
@@ -894,6 +932,21 @@
   <div id="settings">
     <div class="modal">
       <h2>设置</h2>
+      <div class="teammate-outline-settings">
+        <h3>队友穿墙轮廓（同层）</h3>
+        <div class="teammate-outline-row">
+          <span>启用（快捷键 V）</span>
+          <input id="teammateOutlineToggle" type="checkbox" checked>
+        </div>
+        <div class="teammate-outline-row">
+          <span>显示距离</span>
+          <input id="teammateOutlineDistance" type="number" min="3" max="80" step="1" value="28">
+        </div>
+        <div class="teammate-outline-row">
+          <span>透明度</span>
+          <input id="teammateOutlineOpacity" type="range" min="0.1" max="1" step="0.05" value="0.45">
+        </div>
+      </div>
       <h2>存档</h2>
       <div class="modal-row">
         <button id="manualSaveButton" class="secondary-button">保存当前</button>
@@ -1056,7 +1109,10 @@
         posePanelToggle: document.getElementById("posePanelToggle"),
         posePanelBody: document.getElementById("posePanelBody"),
         expressionRow: document.getElementById("expressionRow"),
-        actionRow: document.getElementById("actionRow")
+        actionRow: document.getElementById("actionRow"),
+        teammateOutlineToggle: document.getElementById("teammateOutlineToggle"),
+        teammateOutlineDistance: document.getElementById("teammateOutlineDistance"),
+        teammateOutlineOpacity: document.getElementById("teammateOutlineOpacity")
       };
 
       const state = {
@@ -1098,6 +1154,9 @@
         posePanelCollapsed: false,
         posePanelOpen: false,
         exitPointerAngleSmooth: null,
+        allyOutlineEnabled: true,
+        allyOutlineDistance: 28,
+        allyOutlineOpacity: 0.45,
         parkingLoopVariant: 0,
         lastParkingLoopAt: 0
       };
@@ -1744,7 +1803,23 @@
         beam.position.set(0.42, 1.1, -0.16);
         beam.target.position.set(2, 0.9, -6);
 
-        group.add(torso, legs, headGroup, armL, armR, lamp, beam, beam.target);
+        const outlineMaterial = new THREE.MeshBasicMaterial({
+          color: 0x4ea3ff,
+          transparent: true,
+          opacity: clamp(state.allyOutlineOpacity, 0.1, 1),
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        });
+        const outlineMesh = new THREE.Mesh(
+          new THREE.CylinderBufferGeometry(0.54, 0.44, 1.96, 16, 1, true),
+          outlineMaterial
+        );
+        outlineMesh.position.set(0, 1.02, 0);
+        outlineMesh.renderOrder = 999;
+        outlineMesh.visible = false;
+
+        group.add(torso, legs, headGroup, armL, armR, lamp, beam, beam.target, outlineMesh);
         scene.add(group);
 
         return {
@@ -1760,7 +1835,8 @@
           actionId: "",
           actionStartedAt: 0,
           idlePhase: Math.random() * Math.PI * 2,
-          lastSeen: performance.now()
+          lastSeen: performance.now(),
+          outline: outlineMesh
         };
       }
 
@@ -1917,6 +1993,30 @@
           remote.actionId = nextAction;
           remote.actionStartedAt = nextAt;
         }
+        updateRemoteOutline(remote);
+      }
+
+      function updateRemoteOutline(remote) {
+        if (!remote || !remote.outline) {
+          return;
+        }
+        const sameLevelVisible = Boolean(remote.group && remote.group.visible);
+        if (!sameLevelVisible || !state.allyOutlineEnabled) {
+          remote.outline.visible = false;
+          return;
+        }
+        const dx = remote.group.position.x - state.position.x;
+        const dz = remote.group.position.z - state.position.z;
+        const distance = Math.hypot(dx, dz);
+        const maxDistance = clamp(Number(state.allyOutlineDistance) || 28, 3, 80);
+        remote.outline.visible = distance <= maxDistance;
+        remote.outline.material.opacity = clamp(Number(state.allyOutlineOpacity) || 0.45, 0.1, 1);
+      }
+
+      function refreshRemoteOutlines() {
+        network.remotePlayers.forEach((remote) => {
+          updateRemoteOutline(remote);
+        });
       }
 
       function cleanupRemotePlayers() {
@@ -3248,7 +3348,10 @@
           },
           yaw: state.yaw,
           pitch: state.pitch,
-          flashlightOn: state.flashlightOn
+          flashlightOn: state.flashlightOn,
+          allyOutlineEnabled: state.allyOutlineEnabled,
+          allyOutlineDistance: state.allyOutlineDistance,
+          allyOutlineOpacity: state.allyOutlineOpacity
         };
       }
 
@@ -3267,6 +3370,9 @@
         state.yaw = Number(data.yaw) || 0;
         state.pitch = Number(data.pitch) || 0;
         state.flashlightOn = data.flashlightOn !== false;
+        state.allyOutlineEnabled = data.allyOutlineEnabled !== false;
+        state.allyOutlineDistance = clamp(Number(data.allyOutlineDistance) || 28, 3, 80);
+        state.allyOutlineOpacity = clamp(Number(data.allyOutlineOpacity) || 0.45, 0.1, 1);
         if (data.position) {
           state.position.set(Number(data.position.x) || 0, PLAYER_HEIGHT, Number(data.position.z) || 0);
         } else {
@@ -4050,6 +4156,7 @@
           ui.inventory.style.display = "none";
         }
         renderSaveLists();
+        syncTeammateOutlineControls();
         state.paused = true;
         if (ui.settings) {
           ui.settings.style.display = "flex";
@@ -4759,6 +4866,9 @@
           if (event.code === "KeyE") interact();
           if (event.code === "KeyF") toggleFlashlight();
           if (event.code === "KeyG") placeGlowPowder();
+          if (event.code === "KeyV") {
+            toggleAllyOutlineEnabled();
+          }
           const modalOpen = ui.keypad.style.display === "flex" || ui.inventory.style.display === "flex" || (ui.settings && ui.settings.style.display === "flex");
           if (state.started && !state.dead && !modalOpen) {
             const exprKeys = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5"];
@@ -4822,6 +4932,27 @@
         if (ui.mainMenuButton) {
           ui.mainMenuButton.addEventListener("click", backToMainMenu);
         }
+        if (ui.teammateOutlineToggle) {
+          ui.teammateOutlineToggle.addEventListener("change", () => {
+            state.allyOutlineEnabled = Boolean(ui.teammateOutlineToggle.checked);
+            refreshRemoteOutlines();
+          });
+        }
+        if (ui.teammateOutlineDistance) {
+          ui.teammateOutlineDistance.addEventListener("change", () => {
+            const nextDistance = clamp(Number(ui.teammateOutlineDistance.value) || 28, 3, 80);
+            state.allyOutlineDistance = nextDistance;
+            ui.teammateOutlineDistance.value = String(nextDistance);
+            refreshRemoteOutlines();
+          });
+        }
+        if (ui.teammateOutlineOpacity) {
+          ui.teammateOutlineOpacity.addEventListener("input", () => {
+            const nextOpacity = clamp(Number(ui.teammateOutlineOpacity.value) || 0.45, 0.1, 1);
+            state.allyOutlineOpacity = nextOpacity;
+            refreshRemoteOutlines();
+          });
+        }
         ui.closeKeypad.addEventListener("click", closeKeypad);
         ui.resetButton.addEventListener("click", () => {
           closeInventory();
@@ -4838,6 +4969,25 @@
         });
 
         buildPoseControls();
+      }
+
+      function syncTeammateOutlineControls() {
+        if (ui.teammateOutlineToggle) {
+          ui.teammateOutlineToggle.checked = Boolean(state.allyOutlineEnabled);
+        }
+        if (ui.teammateOutlineDistance) {
+          ui.teammateOutlineDistance.value = String(clamp(Number(state.allyOutlineDistance) || 28, 3, 80));
+        }
+        if (ui.teammateOutlineOpacity) {
+          ui.teammateOutlineOpacity.value = String(clamp(Number(state.allyOutlineOpacity) || 0.45, 0.1, 1));
+        }
+      }
+
+      function toggleAllyOutlineEnabled() {
+        state.allyOutlineEnabled = !state.allyOutlineEnabled;
+        syncTeammateOutlineControls();
+        refreshRemoteOutlines();
+        showMessage(state.allyOutlineEnabled ? "已开启队友穿墙轮廓。" : "已关闭队友穿墙轮廓。");
       }
 
       function updateJoystick(touch, radius) {
@@ -5107,6 +5257,7 @@
         if (state.started) {
           expireLocalPlayerAction();
           updateRemoteAvatarsAnimation(time);
+          refreshRemoteOutlines();
         }
 
         updateHud();
