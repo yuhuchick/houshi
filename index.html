@@ -1472,7 +1472,8 @@
         lvl0Carpet: null,
         lvl0Ceiling: null,
         lvl1Wall: null,
-        lvl1Floor: null
+        lvl1Floor: null,
+        lvl1Ceiling: null
       };
       let envTexturesLoadPromise;
 
@@ -1502,7 +1503,8 @@
             { key: "lvl0Carpet", file: "lvl0_carpet_albedo.png", rx: 4, ry: 4 },
             { key: "lvl0Ceiling", file: "lvl0_ceiling_albedo.png", rx: 2.75, ry: 2.75 },
             { key: "lvl1Wall", file: "lvl1_wall_albedo.png", rx: 2.2, ry: 1.05 },
-            { key: "lvl1Floor", file: "lvl1_floor_albedo.png", rx: 3.5, ry: 3.5 }
+            { key: "lvl1Floor", file: "lvl1_floor_albedo.png", rx: 3.5, ry: 3.5 },
+            { key: "lvl1Ceiling", file: "lvl1_ceiling_albedo.png", rx: 2.75, ry: 2.75 }
           ];
           let remaining = jobs.length;
           const tryFinish = () => {
@@ -1984,7 +1986,9 @@
           floorMaterial = envTextures.lvl1Floor
             ? makeLitSurfaceMaterial(envTextures.lvl1Floor, level.floor)
             : makeMaterial(level.floor, null);
-          ceilingMaterial = makeMaterial(level.ceiling);
+          ceilingMaterial = envTextures.lvl1Ceiling
+            ? makeLitSurfaceMaterial(envTextures.lvl1Ceiling, level.ceiling)
+            : makeMaterial(level.ceiling);
         } else {
           wallMaterial = makeMaterial(level.wall, null);
           floorMaterial = makeMaterial(level.floor, null);
