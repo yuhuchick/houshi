@@ -12,6 +12,25 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pack project files
+        run: |
+          set -euo pipefail
+          tar --exclude='.git' --exclude='node_modules' -czf release.tar.gz .
+
+      - name: Upload release package
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          port: ${{ vars.SSH_PORT != '' && vars.SSH_PORT || 22 }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: release.tar.gz
+          target: /tmp
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -25,8 +44,8 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ vars.DEPLOY_PATH }}"
-            git fetch origin
-            git checkout main
-            git pull --ff-only origin main
+            rm -rf ./*
+            tar -xzf /tmp/release.tar.gz -C "${{ vars.DEPLOY_PATH }}"
+            rm -f /tmp/release.tar.gz
             npm ci --omit=dev
             pm2 reload houshi || pm2 start ecosystem.config.cjs
