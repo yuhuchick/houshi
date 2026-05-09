@@ -874,7 +874,7 @@
             <li>交互：靠近纸条、箱柜、柜子或出口后点击屏幕，也可以按 E。</li>
             <li>手电：按 F 或点击手电按钮开关，电量有限，黑暗会快速提高恐惧。</li>
             <li>补给：搜索箱柜可获得电池、急救包、镇静剂或荧光粉。</li>
-            <li>躲藏：部分柜子可以短时间藏身；撞墙、奔跑和翻找都会增加噪音风险。</li>
+            <li>躲藏：部分柜子可以短时间藏身；躲藏时在画面空白处松手即可出来；撞墙、奔跑和翻找都会增加噪音风险。</li>
           </ul>
         </div>
         <button id="closeIntro" class="primary-button">我知道了，开始探索</button>
@@ -1263,6 +1263,7 @@
           allyOutlineOpacity: 0.45,
           parkingLoopVariant: 0,
           lastParkingLoopAt: 0,
+          lockerReenterCooldownUntil: 0,
         };
 
         const network = {
@@ -1717,6 +1718,7 @@
           glowPowder: null,
           sedative: null,
           fileCabinet: null,
+          lvl0Cardboard: null,
         };
         let itemTexturesLoadPromise;
 
@@ -1759,6 +1761,7 @@
               { key: "fileCabinet", file: "file_cabinet_albedo.png", clamp: false, ru: 1.15, rv: 1.75 },
               { key: "batteryBody", file: "battery_body_albedo.png", clamp: false, ru: 3.25, rv: 1 },
               { key: "sedative", file: "sedative_albedo.png", clamp: false, ru: 2.25, rv: 1 },
+              { key: "lvl0Cardboard", file: "lvl0_wallpaper.png", clamp: false, ru: 2, rv: 2 },
             ];
             let remaining = jobs.length;
             const tryFinish = () => {
@@ -2214,7 +2217,11 @@
           floorMaterial = makeMaterial(level.floor, null);
           ceilingMaterial = makeMaterial(level.ceiling);
         }
-        const propMaterial = makeMaterial(state.levelIndex === 0 ? 0x7d694c : state.levelIndex === 1 ? 0x151515 : 0x777b7f);
+        const propTint = state.levelIndex === 0 ? 0x7d694c : state.levelIndex === 1 ? 0x151515 : 0x777b7f;
+        const propMaterial =
+          state.levelIndex === 0 && itemTextures.lvl0Cardboard
+            ? makeLitSurfaceMaterial(itemTextures.lvl0Cardboard, propTint)
+            : makeMaterial(propTint);
         const floor = makeBox(group, CELL_SIZE, 0.12, CELL_SIZE, 0, -0.06, 0, floorMaterial);
         const ceiling = makeBox(group, CELL_SIZE, 0.12, CELL_SIZE, 0, 3.24, 0, ceilingMaterial);
         floor.receiveShadow = true;
@@ -2651,22 +2658,62 @@
           });
         }
 
+        const PROP_SLOTS = [
+          { x: -3.55, z: -3.15, rotation: 0.18 },
+          { x: 3.35, z: -2.8, rotation: -0.25 },
+          { x: -3.25, z: 2.95, rotation: -0.16 },
+          { x: 3.45, z: 3.15, rotation: 0.24 },
+          { x: 0, z: 3.65, rotation: Math.PI / 2 },
+          { x: 0, z: -3.65, rotation: Math.PI / 2 },
+        ];
+
+        function shufflePropSlots(cx, cz) {
+          const slots = PROP_SLOTS.slice();
+          for (let i = slots.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(randomHash(cx, cz, 200 + i * 17) * (i + 1));
+            const t = slots[i];
+            slots[i] = slots[j];
+            slots[j] = t;
+          }
+          return slots;
+        }
+
         function addProps(group, cx, cz, material) {
           const distanceFromStart = Math.abs(cx) + Math.abs(cz);
+          const shuffledSlots = shufflePropSlots(cx, cz);
+          let slotIndex = 0;
+          const takePropSlot = () => {
+            if (slotIndex >= shuffledSlots.length) {
+              return null;
+            }
+            const slot = shuffledSlots[slotIndex];
+            slotIndex += 1;
+            return slot;
+          };
+
           const propCount = distanceFromStart < 2 ? 1 : 2 + Math.floor(randomHash(cx, cz, 9) * 2);
           for (let i = 0; i < propCount; i += 1) {
-            addRoomFiller(group, cx, cz, i, material);
+            const slot = takePropSlot();
+            if (!slot) {
+              break;
+            }
+            addRoomFiller(group, cx, cz, i, material, slot);
           }
           if (distanceFromStart >= 2 && randomHash(cx, cz, 44) > 0.36) {
-            addSupplyContainer(group, cx, cz, material);
+            const slot = takePropSlot();
+            if (slot) {
+              addSupplyContainer(group, cx, cz, material, slot);
+            }
           }
           if (distanceFromStart >= 1 && randomHash(cx, cz, 88) > 0.42) {
-            addHideSpot(group, cx, cz);
+            const slot = takePropSlot();
+            if (slot) {
+              addHideSpot(group, cx, cz, slot);
+            }
           }
         }
 
-        function addRoomFiller(group, cx, cz, index, material) {
-          const slot = choosePropSlot(cx, cz, index);
+        function addRoomFiller(group, cx, cz, index, material, slot) {
           if (state.levelIndex === 0) {
             addStackedBoxes(group, slot.x, slot.z, slot.rotation, material, randomHash(cx, cz, 60 + index) > 0.48);
           } else if (state.levelIndex === 1) {
@@ -2680,19 +2727,6 @@
           } else {
             addMetalCrate(group, slot.x, slot.z, slot.rotation, makeMaterial(0x555f64), false);
           }
-        }
-
-        function choosePropSlot(cx, cz, index) {
-          const slots = [
-            { x: -3.55, z: -3.15, rotation: 0.18 },
-            { x: 3.35, z: -2.8, rotation: -0.25 },
-            { x: -3.25, z: 2.95, rotation: -0.16 },
-            { x: 3.45, z: 3.15, rotation: 0.24 },
-            { x: 0, z: 3.65, rotation: Math.PI / 2 },
-            { x: 0, z: -3.65, rotation: Math.PI / 2 },
-          ];
-          const offset = Math.floor(randomHash(cx, cz, 50 + index) * slots.length);
-          return slots[(index + offset) % slots.length];
         }
 
         function addStackedBoxes(group, x, z, rotation, material, tall) {
@@ -2775,8 +2809,7 @@
           return null;
         }
 
-        function addSupplyContainer(group, cx, cz, material) {
-          const slot = choosePropSlot(cx, cz, 7);
+        function addSupplyContainer(group, cx, cz, material, slot) {
           const id = "container-" + state.levelIndex + "-" + cx + "-" + cz;
           const searched = state.collected.includes(id);
           let container;
@@ -2817,8 +2850,7 @@
           return "battery";
         }
 
-        function addHideSpot(group, cx, cz) {
-          const slot = choosePropSlot(cx, cz, 11);
+        function addHideSpot(group, cx, cz, slot) {
           const id = "hide-" + state.levelIndex + "-" + cx + "-" + cz;
           const material =
             state.levelIndex === 0
@@ -3569,6 +3601,7 @@
           state.darkTime = 0;
           state.flashlightOn = true;
           state.hiddenUntil = 0;
+          state.lockerReenterCooldownUntil = 0;
           state.noiseLevel = 0;
           state.sedatedUntil = 0;
           state.glowPowder = 0;
@@ -3822,6 +3855,7 @@
           state.dead = false;
           state.paused = false;
           state.hiddenUntil = 0;
+          state.lockerReenterCooldownUntil = 0;
           applyLevelStyle();
           ensureWorldAroundPlayer();
           buildEntities();
@@ -4030,14 +4064,36 @@
           return null;
         }
 
+        function isLockerExitBlockedTarget(target) {
+          return Boolean(
+            target &&
+              target.closest(
+                "#joystick, #stick, #actions, #posePanel, #inventory, #settings, #intro, #keypad, #gameOver, #boot, button, input, textarea, select, label",
+              ),
+          );
+        }
+
+        function exitLockerIfHidden() {
+          if (state.paused || state.dead) {
+            return false;
+          }
+          if (state.hiddenUntil <= performance.now()) {
+            return false;
+          }
+          state.hiddenUntil = 0;
+          state.lockerReenterCooldownUntil = performance.now() + 520;
+          playSound("lockerExit");
+          showMessage("你推开柜门，重新回到走廊。");
+          state.nearest = null;
+          ui.prompt.classList.remove("visible");
+          return true;
+        }
+
         function interact() {
           if (state.paused || state.dead) {
             return;
           }
-          if (state.hiddenUntil > performance.now()) {
-            state.hiddenUntil = 0;
-            playSound("lockerExit");
-            showMessage("你推开柜门，重新回到走廊。");
+          if (exitLockerIfHidden()) {
             return;
           }
           if (!state.nearest) {
@@ -4080,9 +4136,14 @@
           } else if (data.type === "container") {
             searchContainer(state.nearest, data);
           } else if (data.type === "locker") {
+            if (performance.now() < state.lockerReenterCooldownUntil) {
+              playSound("tap");
+              showMessage("你先站稳一会儿，别开柜又撞回去。");
+              return;
+            }
             state.hiddenUntil = performance.now() + 9000;
             playSound("locker");
-            showMessage("你躲进柜子。再次点击屏幕可以出来。");
+            showMessage("你躲进柜子。松开画面空白处即可离开（摇杆与侧边按钮不算）。");
           } else if (data.type === "exit") {
             openKeypad();
           } else if (data.type === "fakeExit") {
@@ -4541,6 +4602,7 @@
           state.dead = false;
           state.won = false;
           state.hiddenUntil = 0;
+          state.lockerReenterCooldownUntil = 0;
           state.posePanelOpen = false;
 
           ui.boot.style.display = "flex";
@@ -5196,6 +5258,16 @@
           );
 
           window.addEventListener("touchend", (event) => {
+            if (state.started && !state.paused && !state.dead && state.hiddenUntil > performance.now()) {
+              for (const touch of event.changedTouches) {
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (!isLockerExitBlockedTarget(target)) {
+                  exitLockerIfHidden();
+                  lookTouch = null;
+                  return;
+                }
+              }
+            }
             for (const touch of event.changedTouches) {
               if (touch.identifier === lookTouch) {
                 const elapsed = performance.now() - lastTapTime;
@@ -5233,7 +5305,15 @@
             lookStartY = event.clientY;
           });
 
-          window.addEventListener("mouseup", () => {
+          window.addEventListener("mouseup", (event) => {
+            if (state.started && !state.paused && !state.dead && state.hiddenUntil > performance.now()) {
+              const target = document.elementFromPoint(event.clientX, event.clientY);
+              if (!isLockerExitBlockedTarget(target)) {
+                exitLockerIfHidden();
+              }
+              lookTouch = null;
+              return;
+            }
             if (lookTouch === -1 && performance.now() - lastTapTime < 220) {
               interact();
             }
@@ -5694,6 +5774,7 @@
             state.fear = 0;
             state.flashlightOn = true;
             state.hiddenUntil = 0;
+            state.lockerReenterCooldownUntil = 0;
             state.darkTime = 0;
             state.noiseLevel = 0;
             state.sedatedUntil = 0;
