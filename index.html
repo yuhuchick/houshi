@@ -985,6 +985,22 @@
           skinStealers: 1,
           moths: 2,
           listeners: 1
+        },
+        {
+          name: "Level 3 地下停车场",
+          wall: 0x25272a,
+          floor: 0x1b1c1d,
+          ceiling: 0x202326,
+          fog: 0x060708,
+          light: 0xcfd9d1,
+          objective: "Level 3：穿过无限循环的地下停车场，收集车位附近的线索，找到收费岗亭后的出口。",
+          smilers: 0,
+          partygoers: 0,
+          skinStealers: 0,
+          moths: 0,
+          listeners: 0,
+          parkingShadows: 2,
+          rustCrawlers: 2
         }
       ];
 
@@ -1081,7 +1097,9 @@
         playerActionAt: 0,
         posePanelCollapsed: false,
         posePanelOpen: false,
-        exitPointerAngleSmooth: null
+        exitPointerAngleSmooth: null,
+        parkingLoopVariant: 0,
+        lastParkingLoopAt: 0
       };
 
       const network = {
@@ -1167,6 +1185,36 @@
         { x: 0, z: -2, px: -0.8, pz: 2.8 }
       ];
 
+      const PARKING_NOTE_SLOTS = [
+        { x: 0, z: 0, px: -17.5, pz: -10.5 },
+        { x: 0, z: 0, px: 21.5, pz: 9.5 },
+        { x: 0, z: 0, px: -6.5, pz: 24.5 }
+      ];
+
+      const PARKING_EXIT = { x: -27.5, z: 29.5 };
+      const PARKING_LOOP_LIMIT = 36;
+      const PARKING_LOOP_DESTINATIONS = [
+        { x: -10, z: -5, yaw: 0.15 },
+        { x: 13, z: 8, yaw: -0.7 },
+        { x: -22, z: 17, yaw: 1.35 },
+        { x: 24, z: -18, yaw: -2.2 }
+      ];
+
+      const PARKING_CAR_SLOTS = [
+        { x: -24, z: -18, r: 0.05, c: 0x28323c, style: "sedan" },
+        { x: -12, z: -18, r: -0.08, c: 0x4b231f, style: "hatch", crawlerHost: true },
+        { x: 0, z: -19, r: 0.03, c: 0x25313a, style: "sedan" },
+        { x: 12, z: -18, r: 0.04, c: 0x34383a, style: "van" },
+        { x: 24, z: -16, r: 0.1, c: 0x1f2c24, style: "sedan" },
+        { x: -25, z: 4, r: Math.PI, c: 0x5c5a50, style: "van", crawlerHost: true },
+        { x: -13, z: 5, r: Math.PI - 0.04, c: 0x353234, style: "sedan" },
+        { x: 7, z: 7, r: Math.PI + 0.08, c: 0x2e3542, style: "hatch" },
+        { x: 22, z: 20, r: Math.PI - 0.1, c: 0x3b2c24, style: "sedan" },
+        { x: 10, z: 21, r: Math.PI + 0.03, c: 0x26332d, style: "hatch" },
+        { x: -12, z: 22, r: Math.PI + 0.06, c: 0x252a2d, style: "van" },
+        { x: -27, z: -3, r: Math.PI / 2 + 0.05, c: 0x312828, style: "sedan" }
+      ];
+
       function noteSlotWorldXZ(slot) {
         return {
           x: slot.x * CELL_SIZE + slot.px,
@@ -1207,12 +1255,21 @@
         const code = Array.from({ length: 3 }, () => String(Math.floor(Math.random() * 10))).join("");
         state.levelSecrets[key] = {
           code,
-          noteSlots: makeRandomNoteSlots()
+          noteSlots: makeRandomNoteSlots(levelIndex)
         };
         return state.levelSecrets[key];
       }
 
-      function makeRandomNoteSlots() {
+      function makeRandomNoteSlots(levelIndex = state.levelIndex) {
+        if (levelIndex === 3) {
+          return PARKING_NOTE_SLOTS.map((slot, index) => ({
+            x: slot.x,
+            z: slot.z,
+            px: slot.px,
+            pz: slot.pz,
+            note: index
+          }));
+        }
         const slots = NEAR_NOTE_SLOT_CANDIDATES.map((slot) => ({ ...slot }));
         for (let i = slots.length - 1; i > 0; i -= 1) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -1247,11 +1304,17 @@
               "碎文件：第一盏没坏的灯指向第二位 {digit}。",
               "门禁卡背面：最后的楼层编号是 {digit}。"
             ]
-            : [
-              "阀门标签：压力编号的第一位是 {digit}。",
-              "管道涂鸦：沿着红灯走，第二位是 {digit}。",
-              "维修牌：出口前最后一个阀门编号 {digit}。"
-            ];
+            : state.levelIndex === 2
+              ? [
+                "阀门标签：压力编号的第一位是 {digit}。",
+                "管道涂鸦：沿着红灯走，第二位是 {digit}。",
+                "维修牌：出口前最后一个阀门编号 {digit}。"
+              ]
+              : [
+                "停车票背面：收费岗亭的坏打印机只吐出第一位 {digit}。",
+                "车位 A-13 的白线被刮掉，露出第二位 {digit}。",
+                "坡道墙上的保安巡逻表写着最后一位 {digit}。"
+              ];
         return templates.map((template, index) => template.replace("{digit}", code[index]));
       }
 
@@ -1260,6 +1323,9 @@
       }
 
       function getExitDoorWorldXZ() {
+        if (state.levelIndex === 3) {
+          return PARKING_EXIT;
+        }
         const exitCell = state.levelIndex === 0 ? { x: 1, z: 1 } : { x: 3, z: 3 };
         const doorLocalZ = -5.84;
         return {
@@ -1358,6 +1424,7 @@
         const texture = new THREE.CanvasTexture(canvas);
         texture.magFilter = THREE.NearestFilter;
         texture.minFilter = THREE.LinearMipMapLinearFilter;
+        texture.userData = texture.userData || {};
         return texture;
       }
 
@@ -1379,6 +1446,7 @@
           ctx.fillRect(0, y, canvas.width, 2);
         }
       });
+      wallpaperTexture.userData.sharedEnvSurface = true;
 
       const carpetTexture = createCanvasTexture((ctx, canvas) => {
         ctx.fillStyle = "#6f5b45";
@@ -1389,11 +1457,97 @@
           ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1, 1);
         }
       });
+      carpetTexture.userData.sharedEnvSurface = true;
 
       function makeMaterial(color, texture) {
         return new THREE.MeshLambertMaterial({
           color,
           map: texture || null
+        });
+      }
+
+      const ENV_TEXTURE_ROOT = "assets/images/env/";
+      const envTextures = {
+        lvl0Wallpaper: null,
+        lvl0Carpet: null,
+        lvl0Ceiling: null,
+        lvl1Wall: null,
+        lvl1Floor: null
+      };
+      let envTexturesLoadPromise;
+
+      function configureEnvSurfaceTexture(tex, repeatX, repeatY) {
+        tex.userData = tex.userData || {};
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeatX, repeatY);
+        tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+        tex.userData.sharedEnvSurface = true;
+        tex.anisotropy = 4;
+      }
+
+      function loadEnvTexturesOnce() {
+        if (envTexturesLoadPromise) {
+          return envTexturesLoadPromise;
+        }
+        envTexturesLoadPromise = new Promise((resolve) => {
+          if (typeof THREE === "undefined" || !THREE.TextureLoader) {
+            resolve();
+            return;
+          }
+          const loader = new THREE.TextureLoader();
+          const jobs = [
+            { key: "lvl0Wallpaper", file: "lvl0_wallpaper_albedo.png", rx: 2.25, ry: 1.05 },
+            { key: "lvl0Carpet", file: "lvl0_carpet_albedo.png", rx: 4, ry: 4 },
+            { key: "lvl0Ceiling", file: "lvl0_ceiling_albedo.png", rx: 2.75, ry: 2.75 },
+            { key: "lvl1Wall", file: "lvl1_wall_albedo.png", rx: 2.2, ry: 1.05 },
+            { key: "lvl1Floor", file: "lvl1_floor_albedo.png", rx: 3.5, ry: 3.5 }
+          ];
+          let remaining = jobs.length;
+          const tryFinish = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+              resolve();
+            }
+          };
+          jobs.forEach(({ key, file, rx, ry }) => {
+            loader.load(
+              ENV_TEXTURE_ROOT + file,
+              (tex) => {
+                configureEnvSurfaceTexture(tex, rx, ry);
+                envTextures[key] = tex;
+                tryFinish();
+              },
+              undefined,
+              () => {
+                envTextures[key] = null;
+                tryFinish();
+              }
+            );
+          });
+        });
+        return envTexturesLoadPromise;
+      }
+
+      /** Albedo PNG + white vertex color (tint preserved when no PNG). Shared maps must carry userData.sharedEnvSurface. */
+      function makeLitSurfaceMaterial(map, tintHex) {
+        if (map) {
+          const mat = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            map
+          });
+          return mat;
+        }
+        return makeMaterial(tintHex, null);
+      }
+
+      function detachSharedEnvMaps(material) {
+        const mats = Array.isArray(material) ? material : [material];
+        mats.forEach((mat) => {
+          if (mat && mat.map && mat.map.userData && mat.map.userData.sharedEnvSurface) {
+            mat.map = null;
+          }
         });
       }
 
@@ -1404,8 +1558,12 @@
           }
           if (child.material) {
             if (Array.isArray(child.material)) {
-              child.material.forEach((material) => material.dispose());
+              child.material.forEach((material) => {
+                detachSharedEnvMaps(material);
+                material.dispose();
+              });
             } else {
+              detachSharedEnvMaps(child.material);
               child.material.dispose();
             }
           }
@@ -1718,10 +1876,33 @@
         group.position.set(cx * CELL_SIZE, 0, cz * CELL_SIZE);
         scene.add(group);
 
-        const isLevel0 = state.levelIndex === 0;
-        const wallMaterial = makeMaterial(level.wall, isLevel0 ? wallpaperTexture : null);
-        const floorMaterial = makeMaterial(level.floor, isLevel0 ? carpetTexture : null);
-        const ceilingMaterial = makeMaterial(level.ceiling);
+        const lev = state.levelIndex;
+        let wallMaterial;
+        let floorMaterial;
+        let ceilingMaterial;
+        if (lev === 0) {
+          wallMaterial = envTextures.lvl0Wallpaper
+            ? makeLitSurfaceMaterial(envTextures.lvl0Wallpaper, level.wall)
+            : makeMaterial(level.wall, wallpaperTexture);
+          floorMaterial = envTextures.lvl0Carpet
+            ? makeLitSurfaceMaterial(envTextures.lvl0Carpet, level.floor)
+            : makeMaterial(level.floor, carpetTexture);
+          ceilingMaterial = envTextures.lvl0Ceiling
+            ? makeLitSurfaceMaterial(envTextures.lvl0Ceiling, level.ceiling)
+            : makeMaterial(level.ceiling);
+        } else if (lev === 1) {
+          wallMaterial = envTextures.lvl1Wall
+            ? makeLitSurfaceMaterial(envTextures.lvl1Wall, level.wall)
+            : makeMaterial(level.wall, null);
+          floorMaterial = envTextures.lvl1Floor
+            ? makeLitSurfaceMaterial(envTextures.lvl1Floor, level.floor)
+            : makeMaterial(level.floor, null);
+          ceilingMaterial = makeMaterial(level.ceiling);
+        } else {
+          wallMaterial = makeMaterial(level.wall, null);
+          floorMaterial = makeMaterial(level.floor, null);
+          ceilingMaterial = makeMaterial(level.ceiling);
+        }
         const propMaterial = makeMaterial(state.levelIndex === 0 ? 0x7d694c : state.levelIndex === 1 ? 0x151515 : 0x777b7f);
         const floor = makeBox(group, CELL_SIZE, 0.12, CELL_SIZE, 0, -0.06, 0, floorMaterial);
         const ceiling = makeBox(group, CELL_SIZE, 0.12, CELL_SIZE, 0, 3.24, 0, ceilingMaterial);
@@ -1788,6 +1969,274 @@
           group.add(light);
           fixture.userData.light = light;
         }
+      }
+
+      function ensureParkingGarage() {
+        const key = "parking-garage";
+        if (generatedCells.has(key)) {
+          return;
+        }
+        const group = new THREE.Group();
+        group.userData.parkingGarage = true;
+        scene.add(group);
+        buildParkingGarage(group);
+        generatedCells.set(key, { group, cx: 0, cz: 0 });
+      }
+
+      function buildParkingGarage(group) {
+        const variant = state.parkingLoopVariant || 0;
+        const floorMaterial = makeMaterial(0x1a1b1c);
+        const ceilingMaterial = makeMaterial(0x232629);
+        const concrete = makeMaterial(0x303336);
+        const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xe7e0bf, transparent: true, opacity: 0.72 });
+        const darkStripeMaterial = new THREE.MeshBasicMaterial({ color: 0x6b6a61, transparent: true, opacity: 0.48 });
+        const floor = makeBox(group, 78, 0.16, 78, 0, -0.08, 0, floorMaterial);
+        const ceiling = makeBox(group, 78, 0.18, 78, 0, 3.05, 0, ceilingMaterial);
+        floor.receiveShadow = true;
+        ceiling.receiveShadow = true;
+
+        for (let x = -30; x <= 30; x += 15) {
+          for (let z = -24; z <= 24; z += 16) {
+            addParkingColumn(group, x, z, concrete);
+          }
+        }
+        addParkingLights(group, variant);
+        addParkingLaneMarkings(group, stripeMaterial, darkStripeMaterial, variant);
+        addParkingRamp(group, 27, -2, -0.55, "下层坡道");
+        addParkingRamp(group, -6, -31, Math.PI / 2, "无尽坡道");
+        addTollBooth(group);
+        addBrokenBarrier(group, -21.5, 28.4, 0.15);
+        addParkingExitGate(group);
+
+        PARKING_CAR_SLOTS.forEach((car, index) => {
+          if (car.crawlerHost || randomHash(index, variant, 93) > 0.18) {
+            const placed = getParkingCarPlacement(index, variant);
+            addParkingCar(group, placed.x, placed.z, placed.r, car.c, car.style, index);
+          }
+        });
+
+        addParkingNotePickups(group);
+        addParkingSupplies(group);
+        addParkingLoopWarnings(group);
+      }
+
+      function addParkingColumn(group, x, z, material) {
+        const column = makeBox(group, 1.35, 3.2, 1.35, x, 1.55, z, material);
+        addBlocker(column);
+        const band = makeBox(group, 1.5, 0.16, 1.5, x, 1.18, z, makeMaterial(0xd6c55f));
+        band.material.transparent = true;
+        band.material.opacity = 0.8;
+      }
+
+      function addParkingLights(group, variant) {
+        for (let x = -24; x <= 24; x += 12) {
+          for (let z = -24; z <= 24; z += 12) {
+            const broken = randomHash(x + variant, z, 17) < 0.42 || (x > 12 && z < -12);
+            const fixture = makeBox(group, 3.6, 0.08, 0.28, x, 2.92, z, makeMaterial(broken ? 0x3b3b34 : 0xe9eee2));
+            fixture.rotation.y = (x + z) % 24 === 0 ? Math.PI / 2 : 0;
+            if (!broken) {
+              const light = new THREE.PointLight(0xdce8dd, 0.48, 12, 1.8);
+              light.position.set(x, 2.65, z);
+              light.userData.flickerSeed = randomHash(x, z, 150 + variant) * 120;
+              group.add(light);
+              fixture.userData.light = light;
+            }
+          }
+        }
+      }
+
+      function addParkingLaneMarkings(group, stripeMaterial, darkStripeMaterial, variant) {
+        for (let z = -28; z <= 28; z += 8) {
+          const lane = makeBox(group, 70, 0.018, 0.08, 0, 0.018, z, z % 16 === 0 ? stripeMaterial : darkStripeMaterial);
+          lane.userData.decor = true;
+        }
+        for (let x = -30; x <= 30; x += 6) {
+          [-22, 18].forEach((z) => {
+            const line = makeBox(group, 0.08, 0.02, 5.2, x + (randomHash(x, variant, 31) > 0.65 ? 0.25 : 0), 0.022, z, stripeMaterial);
+            line.userData.decor = true;
+          });
+        }
+        const arrowMaterial = new THREE.MeshBasicMaterial({ color: 0xf0d96b, transparent: true, opacity: 0.64, side: THREE.DoubleSide });
+        addGuideArrowToward(group, 0, 4, 0, -22, arrowMaterial, 1.25);
+        addGuideArrowToward(group, 16, -5, 34, -4, arrowMaterial, 1.1);
+      }
+
+      function addParkingRamp(group, x, z, rotation, label) {
+        const rampMat = makeMaterial(0x282b2d);
+        const ramp = makeBox(group, 8, 0.12, 15, x, 0.02, z, rampMat);
+        ramp.rotation.y = rotation;
+        const sideA = makeBox(group, 0.32, 0.72, 15, x - Math.cos(rotation) * 4.15, 0.36, z + Math.sin(rotation) * 4.15, makeMaterial(0x3b3d3f));
+        const sideB = makeBox(group, 0.32, 0.72, 15, x + Math.cos(rotation) * 4.15, 0.36, z - Math.sin(rotation) * 4.15, makeMaterial(0x3b3d3f));
+        sideA.rotation.y = rotation;
+        sideB.rotation.y = rotation;
+        addBlocker(sideA);
+        addBlocker(sideB);
+        const sign = makeBox(group, 3.2, 0.55, 0.1, x, 2.05, z + Math.cos(rotation) * 6.2, new THREE.MeshBasicMaterial({ color: 0x111719 }));
+        sign.rotation.y = rotation;
+        sign.userData.loopLabel = label;
+      }
+
+      function getParkingCarPlacement(index, variant = state.parkingLoopVariant || 0) {
+        const car = PARKING_CAR_SLOTS[index % PARKING_CAR_SLOTS.length];
+        return {
+          x: car.x + Math.round(randomHash(index, variant, 11) * 2 - 1),
+          z: car.z + (randomHash(index, variant, 12) > 0.72 ? 0.4 : 0),
+          r: car.r + (randomHash(index, variant, 13) - 0.5) * 0.08,
+          slot: car
+        };
+      }
+
+      function localToWorldXZ(x, z, rotation, lx, lz) {
+        const cos = Math.cos(rotation);
+        const sin = Math.sin(rotation);
+        return {
+          x: x + lx * cos + lz * sin,
+          z: z - lx * sin + lz * cos
+        };
+      }
+
+      function addParkingCar(group, x, z, rotation, color, style = "sedan", index = 0) {
+        const bodyMat = makeMaterial(color);
+        const darkerBodyMat = makeMaterial(Math.max(0, color - 0x101010));
+        const glassMat = makeMaterial(0x0b1116);
+        const tireMat = makeMaterial(0x090909);
+        const trimMat = makeMaterial(0x111315);
+        const lightMat = new THREE.MeshBasicMaterial({ color: 0xe8d7a0, transparent: true, opacity: 0.86 });
+        const tailMat = new THREE.MeshBasicMaterial({ color: 0x8f1f1f, transparent: true, opacity: 0.82 });
+        const rustMat = makeMaterial(0x7b3a1e);
+        const longBody = style === "van";
+        const shortBody = style === "hatch";
+        const bodyDepth = longBody ? 4.9 : shortBody ? 3.9 : 4.35;
+        const bodyWidth = longBody ? 2.35 : 2.18;
+        const bodyHeight = longBody ? 0.86 : 0.64;
+        const cabinDepth = longBody ? 3.1 : shortBody ? 1.8 : 2.05;
+        const cabinHeight = longBody ? 0.9 : 0.62;
+        const body = makeBox(group, bodyWidth, bodyHeight, bodyDepth, x, 0.42, z, bodyMat);
+        body.rotation.y = rotation;
+        addBlocker(body);
+        const cabinCenter = localToWorldXZ(x, z, rotation, 0, longBody ? -0.1 : shortBody ? -0.35 : -0.22);
+        const cabin = makeBox(group, longBody ? 2.05 : 1.72, cabinHeight, cabinDepth, cabinCenter.x, longBody ? 1.12 : 1.02, cabinCenter.z, glassMat);
+        cabin.rotation.y = rotation;
+        const hoodPos = localToWorldXZ(x, z, rotation, 0, -bodyDepth * 0.42);
+        const trunkPos = localToWorldXZ(x, z, rotation, 0, bodyDepth * 0.42);
+        const hood = makeBox(group, bodyWidth * 0.92, 0.08, bodyDepth * 0.22, hoodPos.x, 0.78, hoodPos.z, darkerBodyMat);
+        hood.rotation.y = rotation;
+        const trunk = makeBox(group, bodyWidth * 0.9, 0.08, bodyDepth * 0.2, trunkPos.x, 0.78, trunkPos.z, darkerBodyMat);
+        trunk.rotation.y = rotation;
+        const frontBumper = localToWorldXZ(x, z, rotation, 0, -bodyDepth / 2 - 0.08);
+        const rearBumper = localToWorldXZ(x, z, rotation, 0, bodyDepth / 2 + 0.08);
+        [frontBumper, rearBumper].forEach((pos) => {
+          const bumper = makeBox(group, bodyWidth * 0.92, 0.18, 0.14, pos.x, 0.36, pos.z, trimMat);
+          bumper.rotation.y = rotation;
+        });
+        [-0.56, 0.56].forEach((lx) => {
+          const frontLight = localToWorldXZ(x, z, rotation, lx, -bodyDepth / 2 - 0.16);
+          const rearLight = localToWorldXZ(x, z, rotation, lx, bodyDepth / 2 + 0.16);
+          const headlamp = makeBox(group, 0.34, 0.12, 0.04, frontLight.x, 0.56, frontLight.z, lightMat);
+          const tail = makeBox(group, 0.3, 0.12, 0.04, rearLight.x, 0.55, rearLight.z, tailMat);
+          headlamp.rotation.y = rotation;
+          tail.rotation.y = rotation;
+        });
+        [-1, 1].forEach((side) => {
+          const mirrorPos = localToWorldXZ(x, z, rotation, side * (bodyWidth / 2 + 0.12), -0.78);
+          const mirror = makeBox(group, 0.12, 0.16, 0.28, mirrorPos.x, 1.02, mirrorPos.z, trimMat);
+          mirror.rotation.y = rotation;
+          const doorLine = localToWorldXZ(x, z, rotation, side * (bodyWidth / 2 + 0.012), 0.2);
+          const line = makeBox(group, 0.025, 0.42, longBody ? 2.4 : 1.7, doorLine.x, 0.78, doorLine.z, trimMat);
+          line.rotation.y = rotation;
+        });
+        const plateFront = localToWorldXZ(x, z, rotation, 0, -bodyDepth / 2 - 0.19);
+        const plateRear = localToWorldXZ(x, z, rotation, 0, bodyDepth / 2 + 0.19);
+        [plateFront, plateRear].forEach((pos) => {
+          const plate = makeBox(group, 0.72, 0.12, 0.025, pos.x, 0.47, pos.z, makeMaterial(0xd9d1af));
+          plate.rotation.y = rotation;
+        });
+        if (randomHash(index, state.parkingLoopVariant || 0, 80) > 0.45) {
+          const rustPatch = localToWorldXZ(x, z, rotation, randomHash(index, 0, 81) > 0.5 ? -0.72 : 0.72, randomHash(index, 0, 82) * bodyDepth - bodyDepth / 2);
+          const patch = makeBox(group, 0.42, 0.035, 0.62, rustPatch.x, 0.75, rustPatch.z, rustMat);
+          patch.rotation.y = rotation + 0.08;
+        }
+        for (let sx of [-0.92, 0.92]) {
+          for (let sz of [-bodyDepth * 0.34, bodyDepth * 0.34]) {
+            const wheel = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.28, 0.28, 0.28, 12), tireMat);
+            const pos = localToWorldXZ(x, z, rotation, sx, sz);
+            wheel.position.set(pos.x, 0.26, pos.z);
+            wheel.rotation.z = Math.PI / 2;
+            wheel.rotation.y = rotation;
+            group.add(wheel);
+            const hub = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.13, 0.13, 0.3, 10), makeMaterial(0x6c7072));
+            hub.position.copy(wheel.position);
+            hub.rotation.copy(wheel.rotation);
+            group.add(hub);
+          }
+        }
+      }
+
+      function addTollBooth(group) {
+        const boothMat = makeMaterial(0x394047);
+        const glassMat = makeMaterial(0x152026);
+        const booth = makeBox(group, 4.8, 2.65, 3.6, -29, 1.32, 25.5, boothMat);
+        addBlocker(booth);
+        makeBox(group, 3.8, 0.72, 0.08, -29, 1.75, 23.65, glassMat);
+        makeBox(group, 0.08, 0.72, 2.4, -26.55, 1.75, 25.5, glassMat);
+        const light = new THREE.PointLight(0xc9ffd9, 0.8, 8, 2);
+        light.position.set(-29, 2.5, 24);
+        light.userData.flickerSeed = 301 + (state.parkingLoopVariant || 0);
+        group.add(light);
+      }
+
+      function addBrokenBarrier(group, x, z, rotation) {
+        const postMat = makeMaterial(0x333537);
+        const armMat = makeMaterial(0xd6c55f);
+        const post = makeBox(group, 0.45, 1.2, 0.45, x, 0.6, z, postMat);
+        addBlocker(post);
+        const arm = makeBox(group, 0.18, 0.18, 4.8, x + 2.1, 1.12, z + 0.35, armMat);
+        arm.rotation.y = rotation + 0.55;
+        arm.rotation.z = -0.26;
+      }
+
+      function addParkingExitGate(group) {
+        const gate = makeBox(group, 3.2, 2.8, 0.18, PARKING_EXIT.x, 1.4, PARKING_EXIT.z, makeMaterial(0x151719));
+        const panel = makeBox(group, 2.4, 0.18, 0.1, PARKING_EXIT.x, 2.66, PARKING_EXIT.z - 0.12, new THREE.MeshBasicMaterial({ color: 0x9fffd0 }));
+        panel.material.transparent = true;
+        panel.material.opacity = 0.84;
+        const glow = new THREE.PointLight(0x9fffd0, 1.8, 12, 1.7);
+        glow.position.set(PARKING_EXIT.x, 1.8, PARKING_EXIT.z - 1.2);
+        group.add(glow);
+        gate.userData.interactable = {
+          id: "exit-3",
+          type: "exit",
+          label: "检查收费岗亭后的门",
+          text: "需要输入停车票和车位线索拼出的密码。"
+        };
+        interactables.push(gate);
+        addBlocker(gate);
+      }
+
+      function addParkingNotePickups(group) {
+        const noteTexts = currentLevelNotes();
+        currentNoteSlots().forEach((slot) => {
+          addPickup(group, "note-" + state.levelIndex + "-" + slot.note, "note", "油污线索纸条", noteTexts[slot.note], slot.px, 0.72, slot.pz);
+        });
+      }
+
+      function addParkingSupplies(group) {
+        addBattery(group, 15, 0.55, -26);
+        addMedkit(group, -31, 0.52, 13);
+        addGlowPowder(group, 28, 0.52, 17);
+      }
+
+      function addParkingLoopWarnings(group) {
+        const warningMat = new THREE.MeshBasicMaterial({ color: 0xff6b4a, transparent: true, opacity: 0.7 });
+        [
+          { x: 0, z: -34 },
+          { x: 34, z: 0 },
+          { x: -34, z: -6 },
+          { x: 0, z: 34 }
+        ].forEach((pos) => {
+          const marker = makeBox(group, 5.2, 0.025, 0.16, pos.x, 0.03, pos.z, warningMat);
+          marker.rotation.y = Math.abs(pos.x) > Math.abs(pos.z) ? Math.PI / 2 : 0;
+        });
       }
 
       function addProps(group, cx, cz, material) {
@@ -2097,13 +2546,14 @@
         if (type === "note") {
           mesh = new THREE.Mesh(new THREE.BoxBufferGeometry(0.84, 0.05, 0.6), makeMaterial(0xfff3a8));
           mesh.rotation.x = -Math.PI / 2;
-          if (state.levelIndex === 0) {
-            const marker = new THREE.PointLight(0xffef7d, 0.9, 5, 2);
+          if (state.levelIndex === 0 || state.levelIndex === 3) {
+            const noteColor = state.levelIndex === 3 ? 0x9fffd0 : 0xffef7d;
+            const marker = new THREE.PointLight(noteColor, state.levelIndex === 3 ? 0.72 : 0.9, 5, 2);
             marker.position.set(x, y + 1.05, z);
             group.add(marker);
             const ring = new THREE.Mesh(
               new THREE.TorusBufferGeometry(0.46, 0.025, 8, 24),
-              new THREE.MeshBasicMaterial({ color: 0xffef7d, transparent: true, opacity: 0.82 })
+              new THREE.MeshBasicMaterial({ color: noteColor, transparent: true, opacity: 0.82 })
             );
             ring.position.set(x, y + 0.08, z);
             ring.rotation.x = Math.PI / 2;
@@ -2212,6 +2662,20 @@
       }
 
       function ensureWorldAroundPlayer() {
+        if (state.levelIndex === 3) {
+          ensureParkingGarage();
+          for (let i = interactables.length - 1; i >= 0; i -= 1) {
+            if (!interactables[i].parent) {
+              interactables.splice(i, 1);
+            }
+          }
+          for (let i = blockers.length - 1; i >= 0; i -= 1) {
+            if (!blockers[i].mesh.parent) {
+              blockers.splice(i, 1);
+            }
+          }
+          return;
+        }
         const cx = Math.round(state.position.x / CELL_SIZE);
         const cz = Math.round(state.position.z / CELL_SIZE);
         for (let x = cx - ACTIVE_RADIUS; x <= cx + ACTIVE_RADIUS; x += 1) {
@@ -2240,6 +2704,75 @@
         }
       }
 
+      function updateParkingLoopSpace() {
+        if (state.levelIndex !== 3 || performance.now() - state.lastParkingLoopAt < 900) {
+          return;
+        }
+        const x = state.position.x;
+        const z = state.position.z;
+        const onRamp = (x > 22 && x < 33 && z > -10 && z < 8) || (z < -29 && Math.abs(x) < 10);
+        const pastEdge = Math.abs(x) > PARKING_LOOP_LIMIT || Math.abs(z) > PARKING_LOOP_LIMIT;
+        if (!onRamp && !pastEdge) {
+          return;
+        }
+        state.lastParkingLoopAt = performance.now();
+        state.parkingLoopVariant = (state.parkingLoopVariant + 1) % 1000;
+        const dest = PARKING_LOOP_DESTINATIONS[state.parkingLoopVariant % PARKING_LOOP_DESTINATIONS.length];
+        state.position.set(dest.x, PLAYER_HEIGHT, dest.z);
+        state.velocity.set(0, 0, 0);
+        state.yaw = dest.yaw;
+        state.exitPointerAngleSmooth = null;
+        rebuildParkingGarageOnly();
+        scatterParkingEntities();
+        playSound("parkingLoop");
+        showMessage(onRamp ? "坡道尽头闪了一下，你又回到相似的停车区。" : "停车场尽头折回了另一段重复区域。");
+      }
+
+      function rebuildParkingGarageOnly() {
+        generatedCells.forEach((cell) => {
+          scene.remove(cell.group);
+          disposeObject(cell.group);
+        });
+        generatedCells.clear();
+        blockers.length = 0;
+        interactables.length = 0;
+        placedGlowMarks.forEach((mark) => {
+          scene.remove(mark);
+          disposeObject(mark);
+        });
+        placedGlowMarks.length = 0;
+        ensureParkingGarage();
+        rebuildGlowMarks();
+      }
+
+      function scatterParkingEntities() {
+        entities.forEach((entity, index) => {
+          if (entity.type === "rustCrawler") {
+            const spawn = getRustCrawlerCarSpawn(index);
+            entity.object.position.set(spawn.x, 0.08, spawn.z);
+            entity.object.rotation.y = spawn.yaw;
+            entity.origin.set(spawn.x, 0, spawn.z);
+            entity.emergeTarget = new THREE.Vector3(spawn.emergeX, 0, spawn.emergeZ);
+            entity.hostIndex = spawn.hostIndex;
+            entity.hidden = true;
+            entity.hasEmerged = false;
+            return;
+          }
+          if (entity.type !== "parkingShadow") {
+            return;
+          }
+          const spots = [
+            { x: -18, z: -16 },
+            { x: 24, z: 14 },
+            { x: -27, z: 5 },
+            { x: 10, z: -24 }
+          ];
+          const spot = spots[(state.parkingLoopVariant + index) % spots.length];
+          entity.object.position.set(spot.x, 0, spot.z);
+          entity.origin.set(spot.x, 0, spot.z);
+        });
+      }
+
       function buildEntities() {
         const level = currentLevel();
         for (let i = 0; i < level.smilers; i += 1) {
@@ -2257,9 +2790,34 @@
         for (let i = 0; i < (level.listeners || 0); i += 1) {
           spawnEntity("listener", -14 - i * 7, -10 + i * 9, i);
         }
+        for (let i = 0; i < (level.parkingShadows || 0); i += 1) {
+          spawnEntity("parkingShadow", i === 0 ? -18 : 24, i === 0 ? -16 : 14, i);
+        }
+        for (let i = 0; i < (level.rustCrawlers || 0); i += 1) {
+          const spawn = getRustCrawlerCarSpawn(i);
+          spawnEntity("rustCrawler", spawn.x, spawn.z, i, spawn);
+        }
       }
 
-      function spawnEntity(type, x, z, index) {
+      function getRustCrawlerCarSpawn(index) {
+        const hosts = PARKING_CAR_SLOTS
+          .map((slot, slotIndex) => ({ slot, slotIndex }))
+          .filter((item) => item.slot.crawlerHost);
+        const host = hosts[index % hosts.length] || { slot: PARKING_CAR_SLOTS[0], slotIndex: 0 };
+        const placed = getParkingCarPlacement(host.slotIndex);
+        const under = localToWorldXZ(placed.x, placed.z, placed.r, 0, 0.22);
+        const emerge = localToWorldXZ(placed.x, placed.z, placed.r, index % 2 === 0 ? 1.65 : -1.65, -0.45);
+        return {
+          x: under.x,
+          z: under.z,
+          yaw: placed.r,
+          hostIndex: host.slotIndex,
+          emergeX: emerge.x,
+          emergeZ: emerge.z
+        };
+      }
+
+      function spawnEntity(type, x, z, index, options = {}) {
         const object = type === "smiler"
           ? createSmiler()
           : type === "partygoer"
@@ -2268,18 +2826,27 @@
               ? createSkinStealer()
               : type === "moth"
                 ? createLightMoth()
-                : createListener();
-        object.position.set(x, type === "smiler" || type === "moth" ? 1.65 : 0, z);
+                : type === "parkingShadow"
+                  ? createParkingShadow()
+                  : type === "rustCrawler"
+                    ? createRustCrawler()
+                    : createListener();
+        object.position.set(x, type === "smiler" || type === "moth" ? 1.65 : type === "rustCrawler" ? 0.08 : 0, z);
+        object.rotation.y = options.yaw || 0;
         scene.add(object);
         entities.push({
           type,
           object,
           origin: new THREE.Vector3(x, 0, z),
           state: "patrol",
-          speed: type === "smiler" ? 3.2 : type === "partygoer" ? 1.45 : type === "skin" ? 2.6 : type === "moth" ? 1.65 : 1.55,
+          speed: type === "smiler" ? 3.2 : type === "partygoer" ? 1.45 : type === "skin" ? 2.6 : type === "moth" ? 1.65 : type === "parkingShadow" ? 0.62 : type === "rustCrawler" ? 2.05 : 1.55,
           phase: index * 2.31,
           lastStepSound: 0,
-          hidden: type === "skin"
+          hidden: type === "skin" || type === "rustCrawler",
+          dispersedUntil: 0,
+          hostIndex: options.hostIndex,
+          emergeTarget: options.emergeX !== undefined ? new THREE.Vector3(options.emergeX, 0, options.emergeZ) : null,
+          hasEmerged: type !== "rustCrawler"
         });
       }
 
@@ -2427,6 +2994,56 @@
         return group;
       }
 
+      function createParkingShadow() {
+        const group = new THREE.Group();
+        const uniform = makeMaterial(0x26313a);
+        uniform.transparent = true;
+        uniform.opacity = 0.46;
+        const skin = makeMaterial(0x9eb8b8);
+        skin.transparent = true;
+        skin.opacity = 0.34;
+        const body = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.26, 0.42, 1.25, 8), uniform);
+        body.position.y = 0.9;
+        const head = new THREE.Mesh(new THREE.SphereBufferGeometry(0.22, 12, 12), skin);
+        head.position.y = 1.68;
+        const cap = new THREE.Mesh(new THREE.CylinderBufferGeometry(0.27, 0.25, 0.1, 12), uniform);
+        cap.position.y = 1.93;
+        const brim = new THREE.Mesh(new THREE.BoxBufferGeometry(0.46, 0.045, 0.16), uniform);
+        brim.position.set(0, 1.9, -0.18);
+        const badge = new THREE.Mesh(new THREE.CircleBufferGeometry(0.055, 10), new THREE.MeshBasicMaterial({ color: 0xd0c06a, transparent: true, opacity: 0.72 }));
+        badge.position.set(0.12, 1.1, -0.31);
+        const glow = new THREE.PointLight(0x9ed5ff, 0.32, 5, 2);
+        glow.position.set(0, 1.25, 0);
+        group.add(body, head, cap, brim, badge, glow);
+        group.userData.fadingParts = [body, head, cap, brim, badge];
+        return group;
+      }
+
+      function createRustCrawler() {
+        const group = new THREE.Group();
+        const rust = makeMaterial(0x8a3d1f);
+        const darkRust = makeMaterial(0x2a1710);
+        const body = new THREE.Mesh(new THREE.BoxBufferGeometry(1.15, 0.36, 1.65), rust);
+        body.position.y = 0.42;
+        const head = new THREE.Mesh(new THREE.BoxBufferGeometry(0.48, 0.3, 0.52), darkRust);
+        head.position.set(0, 0.46, -0.96);
+        group.add(body, head);
+        for (let i = 0; i < 4; i += 1) {
+          const side = i % 2 === 0 ? -1 : 1;
+          const z = i < 2 ? -0.45 : 0.52;
+          const leg = new THREE.Mesh(new THREE.BoxBufferGeometry(0.16, 0.16, 0.92), darkRust);
+          leg.position.set(side * 0.58, 0.28, z);
+          leg.rotation.y = side * 0.72;
+          leg.rotation.z = side * 0.18;
+          group.add(leg);
+        }
+        const eyes = new THREE.Mesh(new THREE.BoxBufferGeometry(0.32, 0.06, 0.04), new THREE.MeshBasicMaterial({ color: 0xff6b35 }));
+        eyes.position.set(0, 0.52, -1.24);
+        group.add(eyes);
+        group.userData.legs = group.children.slice(2, 6);
+        return group;
+      }
+
       function resetLevel(keepLevel = true) {
         clearWorld();
         state.dead = false;
@@ -2452,6 +3069,8 @@
         state.playerAction = "";
         state.playerActionAt = 0;
         state.exitPointerAngleSmooth = null;
+        state.parkingLoopVariant = 0;
+        state.lastParkingLoopAt = 0;
         if (!keepLevel) {
           state.levelIndex = 0;
         }
@@ -2467,7 +3086,7 @@
         syncPoseChipUi();
         updatePosePanelVisibility();
         sendNetworkState(true);
-        showMessage(currentLevel().name + "：你在潮湿的地毯上醒来。");
+        showMessage(currentLevel().name + (state.levelIndex === 3 ? "：你站在空旷的地下停车场里。" : "：你在潮湿的地毯上醒来。"));
       }
 
       function nextLevel() {
@@ -2485,8 +3104,8 @@
       function applyLevelStyle() {
         const level = currentLevel();
         scene.fog.color.setHex(level.fog);
-        ambientLight.color.setHex(state.levelIndex === 0 ? 0x383326 : 0x242424);
-        playerLight.color.setHex(state.levelIndex === 2 ? 0xffddd8 : 0xfff3bd);
+        ambientLight.color.setHex(state.levelIndex === 0 ? 0x383326 : state.levelIndex === 3 ? 0x171b1d : 0x242424);
+        playerLight.color.setHex(state.levelIndex === 2 ? 0xffddd8 : state.levelIndex === 3 ? 0xe8fff3 : 0xfff3bd);
         ui.objective.textContent = level.objective;
         ui.levelLabel.textContent = String(state.levelIndex);
       }
@@ -2658,7 +3277,7 @@
           return;
         }
         if (!scene) {
-          startGame(id);
+          void startGame(id);
           return;
         }
         clearWorld();
@@ -3428,12 +4047,31 @@
             updateSkinStealer(entity, delta, distance);
           } else if (entity.type === "moth") {
             updateLightMoth(entity, delta, distance, time);
+          } else if (entity.type === "parkingShadow") {
+            updateParkingShadow(entity, delta, distance, time);
+          } else if (entity.type === "rustCrawler") {
+            updateRustCrawler(entity, delta, distance, time);
           } else {
             updateListener(entity, delta, distance, time);
           }
           updateEntityFootsteps(entity, distance, now);
 
-          const catchDistance = entity.type === "moth" || entity.type === "listener" ? 0.82 : 1.05;
+          if (entity.type === "parkingShadow") {
+            if (distance < 1.35 && state.hiddenUntil < now) {
+              state.fear = clamp(state.fear + delta * 22, 0, 100);
+              if (now - entity.lastStepSound > 950) {
+                entity.lastStepSound = now;
+                flashDamage();
+                showMessage("泊车幽影贴近了你的背后，理智正在被抽空。");
+              }
+            }
+            continue;
+          }
+          if (entity.type === "rustCrawler" && !entity.hasEmerged) {
+            continue;
+          }
+
+          const catchDistance = entity.type === "moth" || entity.type === "listener" || entity.type === "rustCrawler" ? 0.82 : 1.05;
           if (distance < catchDistance && state.hiddenUntil < now) {
             flashDamage();
             const msg = entity.type === "smiler"
@@ -3444,6 +4082,8 @@
                   ? "灯蛾扑进光束，尖锐的翅声贴住了耳朵。"
                   : entity.type === "listener"
                     ? "听声者循着脚步声摸到了你身边。"
+                  : entity.type === "rustCrawler"
+                    ? "锈蚀爬行怪从车底拖住了你的脚踝。"
                     : "伪装碎裂，红色的轮廓扑了过来。";
             showGameOver("你被实体发现了", msg);
           }
@@ -3459,7 +4099,7 @@
         if (distance > 18 || state.hiddenUntil > now) {
           return;
         }
-        const baseInterval = entity.type === "partygoer" ? 720 : entity.type === "skin" ? 430 : entity.type === "listener" ? 820 : 620;
+        const baseInterval = entity.type === "partygoer" ? 720 : entity.type === "skin" ? 430 : entity.type === "listener" ? 820 : entity.type === "parkingShadow" ? 1100 : entity.type === "rustCrawler" ? 360 : 620;
         const interval = clamp(baseInterval + distance * 24, 360, 1050);
         if (now - entity.lastStepSound > interval) {
           entity.lastStepSound = now;
@@ -3523,6 +4163,78 @@
           return;
         }
         hoverPatrol(entity, delta);
+      }
+
+      function updateParkingShadow(entity, delta, distance, time) {
+        const object = entity.object;
+        const lit = state.flashlightOn && state.battery > 0 && distance < 13 && isLookingAt(object.position, 0.7);
+        const watched = isLookingAt(object.position, 0.52);
+        const opacity = lit ? 0.1 : watched ? 0.34 : 0.5 + Math.sin(time * 2.2 + entity.phase) * 0.08;
+        if (object.userData.fadingParts) {
+          object.userData.fadingParts.forEach((part) => {
+            if (part.material && part.material.opacity !== undefined) {
+              part.material.opacity = opacity;
+            }
+          });
+        }
+        object.position.y = Math.sin(time * 1.4 + entity.phase) * 0.07;
+        if (lit) {
+          entity.dispersedUntil = performance.now() + 1400;
+          const away = object.position.clone().sub(state.position);
+          away.y = 0;
+          if (away.lengthSq() > 0.01) {
+            away.normalize();
+            object.position.addScaledVector(away, delta * 3.2);
+          }
+          return;
+        }
+        if (watched || entity.dispersedUntil > performance.now() || state.hiddenUntil > performance.now()) {
+          return;
+        }
+        chase(entity, delta, distance < 5 ? 0.85 : 0.55);
+      }
+
+      function updateRustCrawler(entity, delta, distance, time) {
+        const object = entity.object;
+        if (object.userData.legs) {
+          object.userData.legs.forEach((leg, index) => {
+            leg.rotation.z = (index % 2 === 0 ? 0.2 : -0.2) + Math.sin(time * 12 + index) * 0.22;
+          });
+        }
+        if (entity.hidden && distance < 5.5) {
+          entity.hidden = false;
+          entity.hasEmerged = false;
+          playSound("monsterStep", 0.8);
+          showMessage("车底传来铁锈刮地的声音，有东西正从底盘下面爬出来。");
+        }
+        if (!entity.hidden && !entity.hasEmerged && entity.emergeTarget) {
+          const emergeDirection = entity.emergeTarget.clone().sub(object.position);
+          emergeDirection.y = 0;
+          if (emergeDirection.length() > 0.16) {
+            emergeDirection.normalize();
+            object.position.addScaledVector(emergeDirection, delta * 1.25);
+            object.rotation.y = Math.atan2(emergeDirection.x, emergeDirection.z);
+            return;
+          }
+          entity.hasEmerged = true;
+          entity.origin.copy(object.position);
+        }
+        const lit = state.flashlightOn && state.battery > 0 && distance < 11 && isLookingAt(object.position, 0.64);
+        if (!entity.hidden && state.hiddenUntil < performance.now()) {
+          chase(entity, delta, lit ? 0.38 : distance < 7 ? 1.05 : 0.72);
+          if (distance < 4) {
+            state.fear = clamp(state.fear + delta * 5.5, 0, 100);
+          }
+          return;
+        }
+        if (entity.hidden) {
+          object.position.y = 0.04 + Math.sin(time * 4 + entity.phase) * 0.015;
+          return;
+        }
+        entity.phase += delta * 0.9;
+        object.position.x = entity.origin.x + Math.sin(entity.phase * 0.7) * 1.6;
+        object.position.z = entity.origin.z + Math.cos(entity.phase * 0.5) * 1.2;
+        object.rotation.y = Math.atan2(Math.cos(entity.phase * 0.7), -Math.sin(entity.phase * 0.5));
       }
 
       function updateListener(entity, delta, distance, time) {
@@ -4087,6 +4799,10 @@
         } else if (name === "danger") {
           playTone(92, 0.28, "sawtooth", 0.075, now);
           playNoise(0.16, 0.04, 260);
+        } else if (name === "parkingLoop") {
+          playNoise(0.32, 0.085, 120);
+          playTone(58, 0.42, "sawtooth", 0.055, now);
+          playTone(130, 0.18, "triangle", 0.035, now + 0.14);
         } else if (name === "lowBattery") {
           playTone(760, 0.06, "square", 0.06, now);
           playTone(760, 0.06, "square", 0.05, now + 0.12);
@@ -4256,6 +4972,7 @@
         if (!state.paused && !state.dead) {
           ensureWorldAroundPlayer();
           movePlayer(delta);
+          updateParkingLoopSpace();
           updateCamera();
           updateNearestInteractable();
           updateSurvival(delta);
@@ -4276,17 +4993,34 @@
         renderer.render(scene, camera);
       }
 
-      function startGame(slotId = "") {
+      function refreshLoadedEnvTextureAnisotropy() {
+        if (!renderer || !renderer.capabilities || !renderer.capabilities.getMaxAnisotropy) {
+          return;
+        }
+        const cap = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        Object.keys(envTextures).forEach((key) => {
+          const t = envTextures[key];
+          if (t && t.isTexture) {
+            t.anisotropy = cap;
+            t.needsUpdate = true;
+          }
+        });
+      }
+
+      async function startGame(slotId = "") {
+        await loadEnvTexturesOnce();
         state.playerExpression = "neutral";
         state.playerAction = "";
         state.playerActionAt = 0;
         state.posePanelOpen = false;
         state.posePanelCollapsed = false;
         state.exitPointerAngleSmooth = null;
+        state.lastParkingLoopAt = 0;
         if (!scene) {
           initThree();
           setupControls();
         }
+        refreshLoadedEnvTextureAnisotropy();
         if (slotId) {
           loadProgress(slotId);
         } else {
@@ -4307,6 +5041,7 @@
           state.collected = [];
           state.noteIds = [];
           state.levelSecrets = {};
+          state.parkingLoopVariant = 0;
           state.inputCode = "";
           state.position.set(0, PLAYER_HEIGHT, 0);
           state.velocity.set(0, 0, 0);
@@ -4333,13 +5068,16 @@
         clock.start();
       }
 
-      ui.startButton.addEventListener("click", () => startGame());
+      ui.startButton.addEventListener("click", () => {
+        void startGame();
+      });
       ui.createRoomButton.addEventListener("click", createRoom);
       ui.joinRoomButton.addEventListener("click", () => joinRoom());
       ui.roomInput.addEventListener("input", () => {
         ui.roomInput.value = normalizeRoomId(ui.roomInput.value);
       });
       renderSaveLists();
+      loadEnvTexturesOnce();
       tick();
     })();
   </script>
