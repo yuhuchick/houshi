@@ -18,7 +18,7 @@ jobs:
       - name: Pack project files
         run: |
           set -euo pipefail
-          tar --exclude='.git' --exclude='node_modules' --exclude='release.tar.gz' -czf release.tar.gz .
+          git archive --format=tar.gz --output=release.tar.gz HEAD
 
       - name: Upload release package
         uses: appleboy/scp-action@v0.1.7
